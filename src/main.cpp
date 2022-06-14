@@ -1,7 +1,7 @@
 #include "webserver.h"
 
-int main(int, char**) {
-    webserver server("127.0.0.1", "1024", "ET");
+int main() {
+    webserver server("127.0.0.1", "1024", "ET", 8);
 
     server.run();
 }

@@ -8,10 +8,6 @@
 int webserver::initListenfd() {
     int ret; //检查函数返回值
 
-    // string->const char*
-    const char* ip = this->ip.c_str();
-    const char* port = this->port.c_str();
-
     // 创建监听socket
     int listenfd = socket(AF_INET, SOCK_STREAM, 0); 
     if (listenfd == -1) {
@@ -84,15 +80,14 @@ void webserver::addfd(const int &efd, int fd) {
 /**
  * @brief 读数据，ET模式或LT模式
  * 
- * @param buf 用户缓冲区
  * @param cfd client fd
  */
-void webserver::readData(char *buf, int cfd) {
-    printf("event trigger once.\n");
-    if (this->trigger == "ET") {
+void webserver::readData(int cfd) {
+    char buf[MAX_BUFF_SIZE];
+    if (!strcmp(this->trigger, "ET")) {
         while (true) {
             memset(buf, '\0', sizeof(buf)); // 每次读前都将用户缓冲区重置
-            int ret = recv(cfd, buf, MAX_BUFF_SIZE-1, 0);
+            int ret = recv(cfd, buf, sizeof(buf), 0);
             if (ret < 0) {
                 // 数据读完后，直接break，让epoll继续监听
                 if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
@@ -105,7 +100,7 @@ void webserver::readData(char *buf, int cfd) {
                     continue;
                 }
                 close(cfd);
-                perror("recv < 0.");
+                // perror("recv < 0.");
                 break;
             }
             else if (ret == 0) {
@@ -120,7 +115,7 @@ void webserver::readData(char *buf, int cfd) {
     }
     else {
         memset(buf, '\0', sizeof(buf));
-        int ret = recv(cfd, buf, MAX_BUFF_SIZE-1, 0);
+        int ret = recv(cfd, buf, sizeof(buf), 0);
         if (ret <= 0) {
             close(cfd);
             printf("client close.\n");
@@ -149,11 +144,11 @@ void webserver::buildConn(const int &efd, int listenfd) {
         cfd = accept(listenfd, (struct sockaddr*)&caddr, &caddrLen);
         if (cfd == -1) {
             if ((errno==EAGAIN) || (errno==EWOULDBLOCK)) {
-                perror("accept done, no more client.");
+                // perror("accept done, no more client.");
                 break;
             }
             if (errno == EINTR) {
-                perror("accept was interrupted, continue...");
+                // perror("accept was interrupted, continue...");
                 continue;
             }
         }
@@ -180,10 +175,10 @@ void webserver::epollHandler(const epoll_event *events, const int &eventsLen,
     for (int i = 0; i < eventsLen; i++) {
         int socketfd = events[i].data.fd;
         if (socketfd == listenfd) {
-            buildConn(efd, socketfd);
+            pool->addTask(std::bind(&webserver::buildConn, this, efd, socketfd));
         }
         else if (events[i].events & EPOLLIN) {
-            readData(buf, socketfd);
+            pool->addTask(std::bind(&webserver::readData, this, socketfd));
         }
         else {
             printf("epollHandler error.\n");
