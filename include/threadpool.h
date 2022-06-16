@@ -37,13 +37,21 @@ public:
 
 private:
     void worker(int i) {
-        while (!this->isClose) {
+        while (true) {
             std::unique_lock<std::mutex> locker(this->mux);
-            this->cond.wait(locker, [this]{return !this->workQueue.empty();});
-            auto task = std::move(this->workQueue.front());
-            this->workQueue.pop();
-            locker.unlock();
-            task();
+            if (!this->workQueue.empty()) {
+                this->cond.wait(locker, [this]{return !this->workQueue.empty();});
+                auto task = std::move(this->workQueue.front());
+                this->workQueue.pop();
+                locker.unlock();
+                task();
+            }
+            else if (this->isClose) {
+                break;
+            }
+            else {
+                this->cond.wait(locker);
+            }
         }
     }
 
