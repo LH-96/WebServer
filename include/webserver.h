@@ -10,31 +10,40 @@
 #include <sys/epoll.h>
 
 #include "threadpool.h"
+#include "httpconn.h"
 
-#define MAX_EVENT_NUMBER 1024
-#define MAX_BUFF_SIZE   BUFSIZ
+const int maxEventNumber = 1024;
+const int maxHttpConn = 1024;
 
 class webserver {
 public:
     // 构造、析构。。。
-    webserver() = default;
-    webserver(const char* ip, const char* port, const char* trigger, 
-              int threadCount = 8)
-    : ip(ip), port(port), trigger(trigger), pool(std::make_shared<threadPool>(threadCount)) {}
+    explicit webserver(const char* ip, const char* port, int threadCount = 8)
+    : ip(ip), port(port), pool(std::make_shared<threadPool>(threadCount)),
+      clients(std::vector<httpConn>(maxHttpConn))
+    {}
+
+    ~webserver() = default;
+
+    webserver(const webserver&) = delete;
+    webserver& operator= (const webserver&) = delete;
+
 public:
     // public成员func
     void run();
 private:
-    // private成员func
+    // 初始化一个备用fd，当进程打开的fd达到上限时，用这个fd接受连接再马上关闭
+    int backupfd = open("/dev/null", O_RDONLY | O_CLOEXEC);
+
     int initListenfd();
     void setNonblocking(int fd);
-    void addfd(const int &efd, int fd);
-    void readData(int cfd);
-    void buildConn(const int &efd, int listenfd);
+    void addfd(int efd, int fd, bool isOneshot);
+    void buildConn(int efd, int listenfd);
     void epollHandler(const epoll_event *events, const int &eventsLen, 
-                      const int &efd, const int &listenfd);
+                      int efd, int listenfd);
 private:
     // private变量
-    const char *ip, *port, *trigger;
+    const char *ip, *port;
     std::shared_ptr<threadPool> pool;
+    std::vector<httpConn> clients;
 };

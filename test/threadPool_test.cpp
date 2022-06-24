@@ -19,7 +19,7 @@ void work(int i) {
     }
 
     char buf[100];
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 1; i++) {
         bzero(buf, sizeof(buf));
         sprintf(buf, "no %d loop.\n", i);
         int ret = send(cfd, buf, sizeof(buf), 0);
@@ -30,7 +30,7 @@ void work(int i) {
 }
 
 int main() {
-    std::vector<std::thread> vec(3);
+    std::vector<std::thread> vec(1021);
     for (int i = 0; i < vec.size(); i++) {
         vec.at(i) = std::thread(work, i);
     }

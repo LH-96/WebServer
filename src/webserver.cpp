@@ -65,10 +65,12 @@ void webserver::setNonblocking(int fd) {
  * @param efd epoll树根节点
  * @param fd 需要添加的fd
  */
-void webserver::addfd(const int &efd, int fd) {
+void webserver::addfd(int efd, int fd, bool isOneshot = false) {
     epoll_event event;
     event.data.fd = fd;
-    event.events = this->trigger == "ET" ? EPOLLIN | EPOLLET : EPOLLIN;  // 是否设置ET
+    event.events = EPOLLIN | EPOLLET;  // 设置ET
+    if (isOneshot)
+        event.events |= EPOLLONESHOT;
     int ret = epoll_ctl(efd, EPOLL_CTL_ADD, fd, &event);    // 添加进树中
     if (ret == -1) {
         perror("epoll add fail.");
@@ -78,60 +80,12 @@ void webserver::addfd(const int &efd, int fd) {
 }
 
 /**
- * @brief 读数据，ET模式或LT模式
- * 
- * @param cfd client fd
- */
-void webserver::readData(int cfd) {
-    char buf[MAX_BUFF_SIZE];
-    if (!strcmp(this->trigger, "ET")) {
-        while (true) {
-            memset(buf, '\0', sizeof(buf)); // 每次读前都将用户缓冲区重置
-            int ret = recv(cfd, buf, sizeof(buf), 0);
-            if (ret < 0) {
-                // 数据读完后，直接break，让epoll继续监听
-                if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-                    // perror("read done.");
-                    break;
-                }
-                // 如果被信号中断，重置继续读
-                if (errno == EINTR) {
-                    // perror("read interrupted.");
-                    continue;
-                }
-                close(cfd);
-                // perror("recv < 0.");
-                break;
-            }
-            else if (ret == 0) {
-                close(cfd);
-                printf("client close.\n");
-                break;
-            }
-            else {
-                printf("get %d bytes of content: %s\n", ret, buf);
-            }
-        }
-    }
-    else {
-        memset(buf, '\0', sizeof(buf));
-        int ret = recv(cfd, buf, sizeof(buf), 0);
-        if (ret <= 0) {
-            close(cfd);
-            printf("client close.\n");
-            return;
-        }
-        printf("get %d bytes of content: %s\n", ret, buf);
-    }
-}
-
-/**
  * @brief 在epoll监听到listenfd的事件后，与client建立连接，并将对应的cfd添加到epoll树中
  * 
  * @param efd epoll根节点
  * @param listenfd listenfd
  */
-void webserver::buildConn(const int &efd, int listenfd) {
+void webserver::buildConn(int efd, int listenfd) {
     // client 地址结构 和 fd
     struct sockaddr_in caddr;
     bzero((void*)&caddr, sizeof(caddr));
@@ -151,8 +105,17 @@ void webserver::buildConn(const int &efd, int listenfd) {
                 // perror("accept was interrupted, continue...");
                 continue;
             }
+            if (errno == EMFILE) {
+                // 当进程打开的fd达到上限时，用这个fd接受连接再马上关闭
+                close(this->backupfd);  
+                this->backupfd = accept(listenfd, NULL, NULL); 
+                close(this->backupfd);  
+                this->backupfd = open("/dev/null", O_RDONLY | O_CLOEXEC);  
+                continue;
+            }
         }
-        addfd(efd, cfd);
+        addfd(efd, cfd, true);
+        this->clients[cfd].init(efd, cfd);
         printf("New client connect...\n");
     }
 }
@@ -167,18 +130,21 @@ void webserver::buildConn(const int &efd, int listenfd) {
  * @param listenfd listenfd
  */
 void webserver::epollHandler(const epoll_event *events, const int &eventsLen, 
-                             const int &efd, const int &listenfd) {
-    // buffer
-    char buf[MAX_BUFF_SIZE];
-
+                             int efd, int listenfd) {
     // epoll loop
     for (int i = 0; i < eventsLen; i++) {
         int socketfd = events[i].data.fd;
         if (socketfd == listenfd) {
             pool->addTask(std::bind(&webserver::buildConn, this, efd, socketfd));
         }
+        else if (events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
+            close(socketfd);
+        }
         else if (events[i].events & EPOLLIN) {
-            pool->addTask(std::bind(&webserver::readData, this, socketfd));
+            pool->addTask(std::bind(&httpConn::processConn, &this->clients[socketfd]));
+        }
+        else if (events[i].events & EPOLLOUT) {
+            //写事件
         }
         else {
             printf("epollHandler error.\n");
@@ -195,7 +161,7 @@ void webserver::run() {
     int listenfd = initListenfd();
 
     // epoll
-    epoll_event events[MAX_EVENT_NUMBER];
+    epoll_event events[maxEventNumber];
     int efd = epoll_create(8);
     if (efd == -1) {
         perror("epoll_create fail.");
@@ -204,7 +170,7 @@ void webserver::run() {
     addfd(efd, listenfd);
 
     while (true) {
-        int ret = epoll_wait(efd, events, MAX_EVENT_NUMBER, -1);
+        int ret = epoll_wait(efd, events, maxEventNumber, -1);
         if (ret < 0) {
             perror("epoll_wait fail.");
             return;
