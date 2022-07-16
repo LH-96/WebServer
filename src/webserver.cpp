@@ -1,5 +1,8 @@
 #include "webserver.h"
 
+extern const int maxEventNumber = 1024;
+extern const int maxHttpConn = 1024;
+
 /**
  * @brief 创建监听fd
  * 
@@ -114,9 +117,14 @@ void webserver::buildConn(int efd, int listenfd) {
                 continue;
             }
         }
+        if (httpConn::connNum >= maxHttpConn) {
+            close(cfd);
+            printf("too much clients...\n");
+            continue;
+        }
         addfd(efd, cfd, true);
         this->clients[cfd].init(efd, cfd);
-        printf("New client connect...\n");
+        // printf("New client connect...\n");
     }
 }
 
@@ -141,10 +149,10 @@ void webserver::epollHandler(const epoll_event *events, const int &eventsLen,
             close(socketfd);
         }
         else if (events[i].events & EPOLLIN) {
-            pool->addTask(std::bind(&httpConn::processConn, &this->clients[socketfd]));
+            pool->addTask(std::bind(&httpConn::processRead, &this->clients[socketfd]));
         }
         else if (events[i].events & EPOLLOUT) {
-            //写事件
+            pool->addTask(std::bind(&httpConn::processWrite, &this->clients[socketfd]));
         }
         else {
             printf("epollHandler error.\n");
@@ -172,6 +180,9 @@ void webserver::run() {
     while (true) {
         int ret = epoll_wait(efd, events, maxEventNumber, -1);
         if (ret < 0) {
+            // // 被调试打断
+            // if (errno == EINTR)
+            //     continue;
             perror("epoll_wait fail.");
             return;
         }

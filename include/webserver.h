@@ -12,8 +12,8 @@
 #include "threadpool.h"
 #include "httpconn.h"
 
-const int maxEventNumber = 1024;
-const int maxHttpConn = 1024;
+extern const int maxEventNumber;
+extern const int maxHttpConn;
 
 class webserver {
 public:
