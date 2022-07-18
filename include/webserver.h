@@ -5,8 +5,7 @@
 #include <arpa/inet.h>
 #include <sys/fcntl.h>
 #include <iostream>
-#include <strings.h>
-#include <string.h>
+#include <cstring>
 #include <sys/epoll.h>
 
 #include "threadpool.h"
