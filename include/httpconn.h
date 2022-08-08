@@ -1,15 +1,24 @@
 #pragma once
 #include <sys/unistd.h>
 #include <sys/epoll.h>
-#include <iostream>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/uio.h>
+#include <sys/mman.h>
+#include <fcntl.h>
+#include <iostream>
 #include <cstring>
+#include <cstdarg>
 #include <memory>
 
 class httpConn {
 public:
+    static const char* rootPath;
+
     static const int maxPathLen = 200;
+
+    static const int maxUrlLen = 100;
 
     static const int maxBuffSize = BUFSIZ;
 
@@ -23,12 +32,14 @@ public:
 
     enum SUBSTATUS {LINE_OK = 0, LINE_BAD, LINE_OPEN};
 
-    enum HTTPCODE {NO_REQUEST = 0, GET_REQUEST, BAD_REQUEST};
+    enum HTTPCODE {NO_REQUEST = 0, GET_REQUEST, BAD_REQUEST, NO_RESOURCE, FILE_REQUEST, FORBIDDEN_REQUEST};
 
 public:
     httpConn()
     :   parserRecord(std::make_shared<record>()),
-        efd(0), cfd(0), readIndx(0), curReadIndx(0), curLineBegin(0), writeIndx(0), curWriteIndx(0) {
+        efd(0), cfd(0), readIndx(0), curReadIndx(0), 
+        curLineBegin(0), writeIndx(0), curWriteIndx(0),
+        ivCount(0), sendBytes(0) {
         memset(readBuffer, '\0', maxBuffSize);
         memset(writeBuffer, '\0', maxBuffSize);
     }
@@ -49,8 +60,18 @@ private:
     HTTPCODE parseLine(char* text);
     HTTPCODE parseHeader(char* text);
     HTTPCODE parseContent(char* text);
+    HTTPCODE doRequest();
     HTTPCODE httpParser(); 
-    bool writeData(HTTPCODE status);
+    bool addResponse(const char* format, ...);
+    bool addLine(int status, const char* title);
+    bool addContentLen(int contentLen);
+    bool addContentType();
+    bool addConn();
+    bool addBlankLine();
+    void addHeader(int contentLen);
+    bool addContent(const char* content);
+    bool mergeResponse(HTTPCODE ret);
+    bool writeData();
 
 public:
     void processConn();
@@ -62,7 +83,10 @@ private:
     struct record {
         MAINSTATUS parserStatus;
         METHOD method;
-        char RequestPath[maxPathLen];
+        char requestPath[maxPathLen];
+        char requestUrl[maxUrlLen];
+        struct stat fileStat;
+        char* fileMMAP;
         char httpProt[10];
         CONNECTION conn;
         int contentLen;
@@ -80,4 +104,7 @@ private:
     int curLineBegin; // 当前解析的行的首部
     int writeIndx; // 下一个开始写的位置
     int curWriteIndx;  // 当前写到的位置
+    struct iovec iv[2];
+    int ivCount;
+    int sendBytes;
 };
