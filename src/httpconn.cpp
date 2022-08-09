@@ -24,6 +24,7 @@ void httpConn::init(int efd, int cfd) {
     memset(this->parserRecord->requestPath, '\0', maxPathLen);
     memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
     this->parserRecord->fileMMAP = nullptr;
+    memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
     memset(this->parserRecord->httpProt, '\0', 10);
     this->parserRecord->conn = CLOSE;
     this->parserRecord->contentLen = 0;
@@ -32,6 +33,16 @@ void httpConn::init(int efd, int cfd) {
     // 初始化其他属性
     this->efd = efd;
     this->cfd = cfd;
+    this->readIndx = 0;
+    this->curReadIndx = 0;
+    this->curLineBegin = 0;
+    this->writeIndx = 0;
+    this->curWriteIndx = 0;
+    this->ivCount = 0;
+    this->sendBytes = 0;
+    memset(this->iv, 0, sizeof(struct iovec)*2);
+    memset(this->readBuffer, '\0', maxBuffSize);
+    memset(this->writeBuffer, '\0', maxBuffSize);
 
     // client数量+1
     connNum++;
@@ -43,7 +54,11 @@ void httpConn::resetConn() {
     this->parserRecord->method = GET;
     memset(this->parserRecord->requestPath, '\0', maxPathLen);
     memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
-    this->parserRecord->fileMMAP = nullptr;
+    if (this->parserRecord->fileMMAP) {
+        munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
+        this->parserRecord->fileMMAP = nullptr;
+    }
+    memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
     memset(this->parserRecord->httpProt, '\0', 10);
     this->parserRecord->contentLen = 0;
     this->parserRecord->content = nullptr;
@@ -55,6 +70,7 @@ void httpConn::resetConn() {
     this->curWriteIndx = 0;
     this->ivCount = 0;
     this->sendBytes = 0;
+    memset(this->iv, 0, sizeof(struct iovec)*2);
     memset(this->readBuffer, '\0', maxBuffSize);
     memset(this->writeBuffer, '\0', maxBuffSize);
 }
@@ -223,34 +239,38 @@ httpConn::HTTPCODE httpConn::doRequest() {
 
     // 登录，注册校验
 
-    char *url = (char*)malloc(sizeof(char)*maxUrlLen);
+    char url[100];
+    // 如果是 /，表示默认页面
+    if (strlen(p) == 1 && *p == '/') {
+        strcpy(url, "/welcome.html");
+    }
     // 如果是 /0，表示注册页面
-    if (*(p+1) == '0') {
+    else if (strlen(p) == 2 && *(p+1) == '0') {
         strcpy(url, "/register.html");
     }
     // 如果是 /1，表示登录页面
-    else if (*(p+1) == '1') {
+    else if (strlen(p) == 2 && *(p+1) == '1') {
         strcpy(url, "/log.html");
     }
-    // 默认welcome页面
+    else if (strlen(p) == 2 && *(p+1) == 'v') {
+        strcpy(url, "/video.html");
+    }
+    else if (!strcmp(p, "/xxx.mp4")) {
+        strcpy(url, "/xxx.mp4");
+    }
+    // 无资源
     else {
-        strcpy(url, "/welcome.html");
+        strcpy(url, "/404.html");
     }
     // 拼接最终访问文件path
     strncpy(this->parserRecord->requestPath+len, url, strlen(url));
-    free(url);
 
-    // 用stat函数获取文件信息，成功返回结构体，失败返回NO_RESOURCE
-    if (stat(this->parserRecord->requestPath, &this->parserRecord->fileStat) < 0)
-        return NO_RESOURCE;
+    // 用stat结构体存储文件信息
+    stat(this->parserRecord->requestPath, &this->parserRecord->fileStat);
 
     // 判断文件是否可读，不可读返回FORBIDDEN_REQUEST
     if (!(this->parserRecord->fileStat.st_mode & S_IROTH))
         return FORBIDDEN_REQUEST;
-
-    // 判断文件是否为目录，返回BAD_REQUEST
-    if (S_ISDIR(this->parserRecord->fileStat.st_mode))
-        return BAD_REQUEST;
 
     // 用只读方式获取文件fd，用mmap映射到内存中
     int ffd = open(this->parserRecord->requestPath, O_RDONLY);
@@ -258,7 +278,7 @@ httpConn::HTTPCODE httpConn::doRequest() {
                                     PROT_READ, MAP_PRIVATE, 
                                     ffd, 0);
     close(ffd);
-    return FILE_REQUEST;
+    return strcmp(url, "/404.html")==0 ? NO_RESOURCE : FILE_REQUEST;
 }
 
 httpConn::HTTPCODE httpConn::httpParser() {
@@ -346,7 +366,7 @@ bool httpConn::addBlankLine() {
 }
 
 void httpConn::addHeader(int contentLen) {
-    addContentType();
+    // addContentType();
     addConn();
     addContentLen(contentLen);
     addBlankLine();
@@ -358,11 +378,11 @@ bool httpConn::addContent(const char* content) {
 
 bool httpConn::mergeResponse(HTTPCODE ret) {
     switch(ret) {
-    // 报文语法错误，404
+    // 报文语法错误，400
     case BAD_REQUEST: {
-        addLine(404, error_404_title);
-        addHeader(strlen(error_404_form));
-        if (!addContent(error_404_form))
+        addLine(400, error_400_title);
+        addHeader(strlen(error_400_form));
+        if (!addContent(error_400_form))
             return false;
         break;
     }
@@ -374,29 +394,33 @@ bool httpConn::mergeResponse(HTTPCODE ret) {
             return false;
         break;
     }
+    // 请求错误文件，404
+    case NO_RESOURCE: {
+        addLine(404, error_404_title);
+        addHeader(this->parserRecord->fileStat.st_size);
+        // iovec[0]指向响应报文缓冲区，长度是writeindex
+        this->iv[0].iov_base = this->writeBuffer;
+        this->iv[0].iov_len = this->writeIndx;
+        // iovec[1]指向mmap返回的文件指针，长度是文件大小
+        this->iv[1].iov_base = this->parserRecord->fileMMAP;
+        this->iv[1].iov_len = this->parserRecord->fileStat.st_size;
+        this->ivCount = 2;
+        this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size;
+        return true;
+    }
     // 可访问文件，200
     case FILE_REQUEST: {
         addLine(200, ok_200_title);
-        // 如果访问的文件存在
-        if (this->parserRecord->fileStat.st_size != 0) {
-            addHeader(this->parserRecord->fileStat.st_size);
-            // iovec[0]指向响应报文缓冲区，长度是writeindex
-            this->iv[0].iov_base = this->writeBuffer;
-            this->iv[0].iov_len = this->writeIndx;
-            // iovec[1]指向mmap返回的文件指针，长度是文件大小
-            this->iv[1].iov_base = this->parserRecord->fileMMAP;
-            this->iv[1].iov_len = this->parserRecord->fileStat.st_size;
-            this->ivCount = 2;
-            this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size;
-            return true;
-        }
-        // 如果访问的文件不存在，即大小为0，返回空白html文件
-        else {
-            const char* str = "<html><body>empty</body></html>";
-            addHeader(strlen(str));
-            if (!addContent(str))
-                return false;
-        }
+        addHeader(this->parserRecord->fileStat.st_size);
+        // iovec[0]指向响应报文缓冲区，长度是writeindex
+        this->iv[0].iov_base = this->writeBuffer;
+        this->iv[0].iov_len = this->writeIndx;
+        // iovec[1]指向mmap返回的文件指针，长度是文件大小
+        this->iv[1].iov_base = this->parserRecord->fileMMAP;
+        this->iv[1].iov_len = this->parserRecord->fileStat.st_size;
+        this->ivCount = 2;
+        this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size;
+        return true;
     }
     default:
         return false;
@@ -416,49 +440,52 @@ bool httpConn::writeData() {
     if (this->sendBytes == 0)
         return true;
     
-    // writev函数集中写，发送数据到client
-    temp = writev(this->cfd, this->iv, this->ivCount);
+    while (true) {
+        // writev函数集中写，发送数据到client
+        temp = writev(this->cfd, this->iv, this->ivCount);
 
-    // 正常发送，temp是发送字节数
-    if (temp > 0) {
-        // 更新已发送字节
-        this->curWriteIndx += temp;
-        // 偏移文件iovec指针
-        newadd = this->curWriteIndx - this->writeIndx;
-    }
-    if (temp <= -1) {
-        // 判断缓冲区是否已满
-        if (errno == EAGAIN) {
-            // iovec[0]的内容已发完的情况
-            if (this->curWriteIndx >= this->iv[0].iov_len) {
-                // 不再发送头部信息
-                this->iv[0].iov_len = 0;
-                this->iv[1].iov_base = this->parserRecord->fileMMAP + newadd;
-                this->iv[1].iov_len = this->sendBytes;
-            }
-            // iovec[0]的内容没发完
-            else {
-                this->iv[0].iov_base = this->writeBuffer + this->sendBytes;
-                this->iv[0].iov_len = this->iv[0].iov_len - this->curWriteIndx;
-            }
-            return false;
+        // 正常发送，temp是发送字节数
+        if (temp > 0) {
+            // 更新已发送字节
+            this->curWriteIndx += temp;
+            // 偏移文件iovec指针
+            newadd = this->curWriteIndx - this->writeIndx;
         }
-        // 发送失败，但不是缓冲区问题，取消mmap
-        munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-        this->parserRecord->fileMMAP = nullptr;
-        return true;
-    }
+        if (temp <= -1) {
+            // 判断缓冲区是否已满
+            if (errno == EAGAIN) {
+                // printf("send EAGAIN...\n");
+                // iovec[0]的内容已发完的情况
+                if (this->curWriteIndx >= this->iv[0].iov_len) {
+                    // 不再发送头部信息
+                    this->iv[0].iov_len = 0;
+                    this->iv[1].iov_base = this->parserRecord->fileMMAP + newadd;
+                    this->iv[1].iov_len = this->sendBytes;
+                }
+                // iovec[0]的内容没发完
+                else {
+                    this->iv[0].iov_base = this->writeBuffer + this->sendBytes;
+                    this->iv[0].iov_len = this->iv[0].iov_len - this->curWriteIndx;
+                }
+                return false;
+            }
+            // 发送失败，但不是缓冲区问题，取消mmap
+            munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
+            this->parserRecord->fileMMAP = nullptr;
+            return true;
+        }
 
-    // 更新已发送字节
-    this->sendBytes -= temp;
+        // 更新已发送字节
+        this->sendBytes -= temp;
 
-    // 数据全部发送完成
-    if (this->sendBytes <= 0) {
-        munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-        this->parserRecord->fileMMAP = nullptr;
-        return true; 
+        // 数据全部发送完成
+        if (this->sendBytes <= 0) {
+            munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
+            this->parserRecord->fileMMAP = nullptr;
+            return true; 
+        }
     }
-    return false;
+    return true;
 }
 
 void httpConn::processConn() {
@@ -492,6 +519,7 @@ void httpConn::processRead() {
 }
 
 void httpConn::processWrite() {
+    // printf("resend...\n");
     bool writeStatus = writeData();
     if (!writeStatus) {
         resetfd(EPOLLOUT);
