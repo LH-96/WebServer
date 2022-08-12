@@ -1,7 +1,7 @@
 #include "httpconn.h"
 
 const char *httpConn::rootPath = "/home/leo/WebServer/root";
-int httpConn::connNum = 0;
+std::atomic_int httpConn::connNum(0);
 
 const char *ok_200_title = "OK";
 const char *error_400_title = "Bad Request";
@@ -102,12 +102,12 @@ void httpConn::readData() {
             if (errno == EINTR) {
                 continue;
             }
-            close(this->cfd);
+            // closeConn();
             perror("read data error.");
             break;
         }
         else if (ret == 0) {
-            close(this->cfd);
+            // closeConn();
             // printf("client close.\n");
             break;
         }
