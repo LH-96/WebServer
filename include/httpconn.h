@@ -11,6 +11,7 @@
 #include <cstring>
 #include <cstdarg>
 #include <memory>
+#include <atomic>
 
 class httpConn {
 public:
@@ -22,7 +23,7 @@ public:
 
     static const int maxBuffSize = BUFSIZ;
 
-    static int connNum;
+    static std::atomic_int connNum;
 
     enum METHOD {GET = 0, POST};
 
@@ -53,7 +54,6 @@ public:
 private:
     void resetfd(EPOLL_EVENTS eventStatus);
     void resetConn();
-    void closeConn();
     void readData();
     char* getLine();
     SUBSTATUS readLine();
@@ -74,6 +74,7 @@ private:
     bool writeData();
 
 public:
+    void closeConn();
     void processConn();
     void processRead();
     void processWrite();
