@@ -1,7 +1,7 @@
 #include "webserver.h"
 
-extern const int maxEventNumber = 1024;
-extern const int maxHttpConn = 1024;
+extern const int maxEventNumber = 10240;
+extern const int maxHttpConn = 10240;
 
 /**
  * @brief 创建监听fd

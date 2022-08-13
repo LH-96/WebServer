@@ -4,9 +4,9 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <sys/fcntl.h>
+#include <sys/epoll.h>
 #include <iostream>
 #include <cstring>
-#include <sys/epoll.h>
 
 #include "threadpool.h"
 #include "httpconn.h"
@@ -30,6 +30,7 @@ public:
 public:
     // public成员func
     void run();
+
 private:
     // 初始化一个备用fd，当进程打开的fd达到上限时，用这个fd接受连接再马上关闭
     int backupfd = open("/dev/null", O_RDONLY | O_CLOEXEC);
@@ -40,6 +41,7 @@ private:
     void buildConn(int efd, int listenfd);
     void epollHandler(const epoll_event *events, const int &eventsLen, 
                       int efd, int listenfd);
+                    
 private:
     // private变量
     const char *ip, *port;
