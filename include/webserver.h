@@ -10,6 +10,7 @@
 
 #include "threadpool.h"
 #include "httpconn.h"
+#include "heaptimer.h"
 
 extern const int maxEventNumber;
 extern const int maxHttpConn;
@@ -17,9 +18,9 @@ extern const int maxHttpConn;
 class webserver {
 public:
     // 构造、析构。。。
-    explicit webserver(const char* ip, const char* port, int threadCount = 8)
+    explicit webserver(const char* ip, const char* port, int threadCount = 8, int timeoutMS = 10000)
     : ip(ip), port(port), pool(std::make_shared<threadPool>(threadCount)),
-      clients(std::vector<httpConn>(maxHttpConn))
+      clients(std::vector<httpConn>(maxHttpConn)), timer_(new HeapTimer()), timeoutMS_(timeoutMS)
     {}
 
     ~webserver() = default;
@@ -47,4 +48,6 @@ private:
     const char *ip, *port;
     std::shared_ptr<threadPool> pool;
     std::vector<httpConn> clients;
+    std::unique_ptr<HeapTimer> timer_;
+    int timeoutMS_;
 };

@@ -40,7 +40,7 @@ public:
     :   parserRecord(std::make_shared<record>()),
         efd(0), cfd(0), readIndx(0), curReadIndx(0), 
         curLineBegin(0), writeIndx(0), curWriteIndx(0),
-        ivCount(0), sendBytes(0) {
+        ivCount(0), sendBytes(0), isclose(false) {
         memset(readBuffer, '\0', maxBuffSize);
         memset(writeBuffer, '\0', maxBuffSize);
     }
@@ -108,4 +108,5 @@ private:
     struct iovec iv[2];
     int ivCount;
     int sendBytes;
+    bool isclose;
 };

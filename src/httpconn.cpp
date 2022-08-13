@@ -40,6 +40,7 @@ void httpConn::init(int efd, int cfd) {
     this->curWriteIndx = 0;
     this->ivCount = 0;
     this->sendBytes = 0;
+    this->isclose = false;
     memset(this->iv, 0, sizeof(struct iovec)*2);
     memset(this->readBuffer, '\0', maxBuffSize);
     memset(this->writeBuffer, '\0', maxBuffSize);
@@ -70,6 +71,7 @@ void httpConn::resetConn() {
     this->curWriteIndx = 0;
     this->ivCount = 0;
     this->sendBytes = 0;
+    this->isclose = false;
     memset(this->iv, 0, sizeof(struct iovec)*2);
     memset(this->readBuffer, '\0', maxBuffSize);
     memset(this->writeBuffer, '\0', maxBuffSize);
@@ -83,11 +85,14 @@ void httpConn::resetfd(EPOLL_EVENTS eventStatus) {
 }
 
 void httpConn::closeConn() {
-    epoll_ctl(this->efd, EPOLL_CTL_DEL, this->cfd, 0);
-    close(this->cfd);
-    // client数量-1
-    connNum--;
-    // printf("server close..\n");
+    if (this->isclose == false) {
+        this->isclose = true;
+        epoll_ctl(this->efd, EPOLL_CTL_DEL, this->cfd, 0);
+        close(this->cfd);
+        // client数量-1
+        connNum--;
+        // printf("server close..\n");
+    }
 }
 
 void httpConn::readData() {

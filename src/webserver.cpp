@@ -122,8 +122,9 @@ void webserver::buildConn(int efd, int listenfd) {
             printf("too much clients...\n");
             continue;
         }
-        addfd(efd, cfd, true);
         this->clients[cfd].init(efd, cfd);
+        timer_->add(cfd, timeoutMS_, std::bind(&httpConn::closeConn, &clients[cfd]));
+        addfd(efd, cfd, true);
         // printf("New client connect...\n");
     }
 }
@@ -143,15 +144,17 @@ void webserver::epollHandler(const epoll_event *events, const int &eventsLen,
     for (int i = 0; i < eventsLen; i++) {
         int socketfd = events[i].data.fd;
         if (socketfd == listenfd) {
-            pool->addTask(std::bind(&webserver::buildConn, this, efd, socketfd));
+            buildConn(efd, socketfd);
         }
         else if (events[i].events & (EPOLLRDHUP | EPOLLHUP | EPOLLERR)) {
             close(socketfd);
         }
         else if (events[i].events & EPOLLIN) {
+            timer_->adjust(socketfd, timeoutMS_);
             pool->addTask(std::bind(&httpConn::processRead, &this->clients[socketfd]));
         }
         else if (events[i].events & EPOLLOUT) {
+            timer_->adjust(socketfd, timeoutMS_);
             pool->addTask(std::bind(&httpConn::processWrite, &this->clients[socketfd]));
         }
         else {
@@ -178,7 +181,7 @@ void webserver::run() {
     addfd(efd, listenfd);
 
     while (true) {
-        int ret = epoll_wait(efd, events, maxEventNumber, -1);
+        int ret = epoll_wait(efd, events, maxEventNumber, timer_->GetNextTick());
         if (ret < 0) {
             // // 被调试打断
             // if (errno == EINTR)

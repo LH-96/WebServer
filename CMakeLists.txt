@@ -7,6 +7,7 @@ enable_testing()
 add_test(threadPool_test ${CMAKE_SOURCE_DIR}/build/test/threadPool_test)
 
 set(SOURCES
+    src/heaptimer.cpp
     src/httpconn.cpp
     src/webserver.cpp
     src/main.cpp
