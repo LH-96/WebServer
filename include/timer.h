@@ -28,7 +28,7 @@ class timer {
 public:
     timer() = default;
     timer(const timer&) = delete;
-    timer operator=(const timer&) = delete;
+    timer& operator=(const timer&) = delete;
     ~timer() = default;
 
 private:

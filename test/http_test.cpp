@@ -22,10 +22,13 @@ int main() {
     inet_pton(AF_INET, "127.0.0.1", (void*)&caddr.sin_addr);
     int cfd = socket(AF_INET, SOCK_STREAM, 0);
     int ret = connect(cfd, (struct sockaddr*)&caddr, sizeof(caddr));
-    // char meg[200] = "get / http/1.1\r\nConnection:keep-alive\r\n\r\n";
-    // send(cfd, meg, strlen(meg), 0);
-    // char rbuf[1024];
-    // ret = read(cfd, rbuf, sizeof(rbuf));
-    // printf("%s\n", rbuf);
-	while (true) {}
+    char meg[200] = "get / http/1.1\r\nConnection:keep-alive\r\n\r\n";
+    send(cfd, meg, strlen(meg), 0);
+    char rbuf[1024];
+    ret = read(cfd, rbuf, sizeof(rbuf));
+    printf("%s\n", rbuf);
+    sleep(5);
+    if (isTCPConn(cfd))
+        close(cfd);
+    return 0;
 }
