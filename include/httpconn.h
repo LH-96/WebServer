@@ -54,7 +54,8 @@ public:
 private:
     void resetfd(EPOLL_EVENTS eventStatus);
     void resetConn();
-    void readData();
+    void resetHttpInfo();
+    bool readData();
     char* getLine();
     SUBSTATUS readLine();
     HTTPCODE parseLine(char* text);

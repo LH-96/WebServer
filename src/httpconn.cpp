@@ -77,6 +77,27 @@ void httpConn::resetConn() {
     memset(this->writeBuffer, '\0', maxBuffSize);
 }
 
+void httpConn::resetHttpInfo() {
+    this->parserRecord->parserStatus = CHECK_REQUEST_LINE;
+    memset(this->parserRecord->requestPath, '\0', maxPathLen);
+    memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
+    if (this->parserRecord->fileMMAP) {
+        munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
+        this->parserRecord->fileMMAP = nullptr;
+    }
+    memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
+    memset(this->parserRecord->httpProt, '\0', 10);
+    this->parserRecord->contentLen = 0;
+    this->parserRecord->content = nullptr;
+
+    memset(this->writeBuffer, '\0', maxBuffSize);
+    memset(this->iv, 0, sizeof(struct iovec)*2);
+    this->writeIndx = 0;
+    this->curWriteIndx = 0;
+    this->ivCount = 0;
+    this->sendBytes = 0;
+}
+
 void httpConn::resetfd(EPOLL_EVENTS eventStatus) {
     epoll_event event;
     event.data.fd = this->cfd;
@@ -95,26 +116,26 @@ void httpConn::closeConn() {
     }
 }
 
-void httpConn::readData() {
+bool httpConn::readData() {
     while (true) {
         int ret = recv(this->cfd, this->readBuffer+readIndx, maxBuffSize-readIndx, 0);
         if (ret < 0) {
             // 数据读完后，直接break
             if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-                break;
+                return true;
             }
             // 如果被信号中断，重置继续读
             if (errno == EINTR) {
                 continue;
             }
-            // closeConn();
-            perror("read data error.");
-            break;
+            closeConn();
+            // perror("read data error.");
+            return false;
         }
         else if (ret == 0) {
-            // closeConn();
+            closeConn();
             // printf("client close.\n");
-            break;
+            return false;
         }
         else {
             this->readIndx += ret;
@@ -439,7 +460,7 @@ bool httpConn::mergeResponse(HTTPCODE ret) {
 }
 
 bool httpConn::writeData() {
-    int temp = 0, newadd = 0;
+    int temp = 0;
 
     // 如果发送的数据长度为0，直接返回
     if (this->sendBytes == 0)
@@ -449,48 +470,41 @@ bool httpConn::writeData() {
         // writev函数集中写，发送数据到client
         temp = writev(this->cfd, this->iv, this->ivCount);
 
-        // 正常发送，temp是发送字节数
-        if (temp > 0) {
-            // 更新已发送字节
-            this->curWriteIndx += temp;
-            // 偏移文件iovec指针
-            newadd = this->curWriteIndx - this->writeIndx;
-        }
-        if (temp <= -1) {
-            // 判断缓冲区是否已满
+        if (temp < 0) {
             if (errno == EAGAIN) {
-                // printf("send EAGAIN...\n");
-                // iovec[0]的内容已发完的情况
-                if (this->curWriteIndx >= this->iv[0].iov_len) {
-                    // 不再发送头部信息
-                    this->iv[0].iov_len = 0;
-                    this->iv[1].iov_base = this->parserRecord->fileMMAP + newadd;
-                    this->iv[1].iov_len = this->sendBytes;
-                }
-                // iovec[0]的内容没发完
-                else {
-                    this->iv[0].iov_base = this->writeBuffer + this->sendBytes;
-                    this->iv[0].iov_len = this->iv[0].iov_len - this->curWriteIndx;
-                }
                 return false;
             }
-            // 发送失败，但不是缓冲区问题，取消mmap
-            munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-            this->parserRecord->fileMMAP = nullptr;
+            if (this->parserRecord->fileMMAP) {
+                munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
+                this->parserRecord->fileMMAP = nullptr;
+            }
             return true;
         }
 
         // 更新已发送字节
+        this->curWriteIndx += temp;
         this->sendBytes -= temp;
+        if (this->curWriteIndx >= this->iv[0].iov_len) {
+            // 不再发送头部信息
+            this->iv[0].iov_len = 0;
+            this->iv[1].iov_base = this->parserRecord->fileMMAP + (this->curWriteIndx-this->writeIndx);
+            this->iv[1].iov_len = this->sendBytes;
+        }
+        // iovec[0]的内容没发完
+        else {
+            this->iv[0].iov_base = this->writeBuffer + this->curWriteIndx;
+            this->iv[0].iov_len = this->iv[0].iov_len - this->curWriteIndx;
+        }
 
         // 数据全部发送完成
         if (this->sendBytes <= 0) {
-            munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-            this->parserRecord->fileMMAP = nullptr;
+            if (this->parserRecord->fileMMAP) {
+                munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
+                this->parserRecord->fileMMAP = nullptr;
+            }
             return true; 
         }
     }
-    return true;
 }
 
 void httpConn::processConn() {
@@ -506,6 +520,7 @@ void httpConn::processConn() {
             resetfd(EPOLLOUT);
             return;
         }
+        resetHttpInfo();
     }
     if (this->parserRecord->conn == KEEPALIVE) {
         resetConn();
@@ -519,7 +534,9 @@ void httpConn::processConn() {
 }
 
 void httpConn::processRead() {
-    readData();
+    if (!readData()) {
+        return;
+    }
     processConn();
 }
 
@@ -529,6 +546,7 @@ void httpConn::processWrite() {
     if (!writeStatus) {
         resetfd(EPOLLOUT);
         return;
-    } 
+    }
+    resetHttpInfo();
     processConn();
 }
