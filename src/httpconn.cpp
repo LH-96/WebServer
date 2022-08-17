@@ -6,10 +6,10 @@ std::atomic_int httpConn::connNum(0);
 const char *ok_200_title = "OK";
 const char *error_400_title = "Bad Request";
 const char *error_400_form = "Your request has bad syntax or is inherently impossible to staisfy.\n";
+const char *range_206_title = "Partial Content";
 const char *error_403_title = "Forbidden";
 const char *error_403_form = "You do not have permission to get file form this server.\n";
 const char *error_404_title = "Not Found";
-const char *error_404_form = "The requested file was not found on this server.\n";
 
 /**
  * @brief 在建立一个http连接时，初始化一个http对象(全部参数初始化)
@@ -23,9 +23,13 @@ void httpConn::init(int efd, int cfd) {
     this->parserRecord->method = GET;
     memset(this->parserRecord->requestPath, '\0', maxPathLen);
     memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
-    this->parserRecord->fileMMAP = nullptr;
+    unMMap();
+    memset(this->parserRecord->fileType, '\0', sizeof(this->parserRecord->fileType));
+    this->parserRecord->isRangeTransp = false;
+    this->parserRecord->rangeBegin = 0;
+    this->parserRecord->rangeEnd = 0;
     memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
-    memset(this->parserRecord->httpProt, '\0', 10);
+    memset(this->parserRecord->httpProt, '\0', sizeof(this->parserRecord->httpProt));
     this->parserRecord->conn = CLOSE;
     this->parserRecord->contentLen = 0;
     this->parserRecord->content = nullptr;
@@ -55,12 +59,13 @@ void httpConn::resetConn() {
     this->parserRecord->method = GET;
     memset(this->parserRecord->requestPath, '\0', maxPathLen);
     memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
-    if (this->parserRecord->fileMMAP) {
-        munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-        this->parserRecord->fileMMAP = nullptr;
-    }
+    unMMap();
     memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
-    memset(this->parserRecord->httpProt, '\0', 10);
+    memset(this->parserRecord->fileType, '\0', sizeof(this->parserRecord->fileType));
+    memset(this->parserRecord->httpProt, '\0', sizeof(this->parserRecord->httpProt));
+    this->parserRecord->isRangeTransp = false;
+    this->parserRecord->rangeBegin = 0;
+    this->parserRecord->rangeEnd = 0;
     this->parserRecord->contentLen = 0;
     this->parserRecord->content = nullptr;
 
@@ -81,12 +86,13 @@ void httpConn::resetHttpInfo() {
     this->parserRecord->parserStatus = CHECK_REQUEST_LINE;
     memset(this->parserRecord->requestPath, '\0', maxPathLen);
     memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
-    if (this->parserRecord->fileMMAP) {
-        munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-        this->parserRecord->fileMMAP = nullptr;
-    }
+    unMMap();
     memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
-    memset(this->parserRecord->httpProt, '\0', 10);
+    memset(this->parserRecord->httpProt, '\0', sizeof(this->parserRecord->httpProt));
+    memset(this->parserRecord->fileType, '\0', sizeof(this->parserRecord->fileType));
+    this->parserRecord->isRangeTransp = false;
+    this->parserRecord->rangeBegin = 0;
+    this->parserRecord->rangeEnd = 0;
     this->parserRecord->contentLen = 0;
     this->parserRecord->content = nullptr;
 
@@ -244,6 +250,22 @@ httpConn::HTTPCODE httpConn::parseHeader(char* text) {
         text += strspn(text, " \t");
         this->parserRecord->contentLen = atol(text);
     }
+    else if (strncasecmp(text, "Range:", 6) == 0) {
+        // Range:bytes=0-123
+        text += 13;
+        char* tmp = nullptr;  // 使用strtoul后，tmp指向第一个非数字位置（—）
+        this->parserRecord->isRangeTransp = true;
+        this->parserRecord->rangeBegin = strtoul(text, &tmp, 0);
+        if (strlen(tmp) == 1) {
+            // Range:bytes=0- ，将rangeEnd暂设为-1，后面获取请求文件再设为文件大小-1
+            this->parserRecord->rangeEnd = -1;
+        }
+        else {
+            text = tmp + 1;
+            tmp = nullptr;
+            this->parserRecord->rangeEnd = strtoul(text, &tmp, 0);
+        }
+    }
     return NO_REQUEST;
 }
 
@@ -298,12 +320,22 @@ httpConn::HTTPCODE httpConn::doRequest() {
     if (!(this->parserRecord->fileStat.st_mode & S_IROTH))
         return FORBIDDEN_REQUEST;
 
+    // 获取文件类型
+    p = strrchr(this->parserRecord->requestPath, '.');
+    strcpy(this->parserRecord->fileType, p+1);
+
     // 用只读方式获取文件fd，用mmap映射到内存中
     int ffd = open(this->parserRecord->requestPath, O_RDONLY);
     this->parserRecord->fileMMAP = (char*)mmap(0, this->parserRecord->fileStat.st_size, 
                                     PROT_READ, MAP_PRIVATE, 
                                     ffd, 0);
     close(ffd);
+
+    // 如果是range方式传输，且range尾端未知（-1），设为文件大小-1(因为是从0开始索引)
+    if (this->parserRecord->isRangeTransp && (this->parserRecord->rangeEnd == -1)) {
+        this->parserRecord->rangeEnd = this->parserRecord->fileStat.st_size -1;
+    }
+
     return strcmp(url, "/404.html")==0 ? NO_RESOURCE : FILE_REQUEST;
 }
 
@@ -347,6 +379,15 @@ httpConn::HTTPCODE httpConn::httpParser() {
     return NO_REQUEST;
 }
 
+bool httpConn::unMMap() {
+    if (this->parserRecord->fileMMAP) {
+        munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
+        this->parserRecord->fileMMAP = nullptr;
+        return true;
+    }
+    return false;
+}
+
 bool httpConn::addResponse(const char* format, ...) {
     if (this->writeIndx >= maxBuffSize)
         return false;
@@ -371,15 +412,26 @@ bool httpConn::addResponse(const char* format, ...) {
 }
 
 bool httpConn::addLine(int status, const char* title) {
-    return addResponse("%s %d %s\r\n","HTTP/1.1",status,title);
+    return addResponse("%s %d %s\r\n","HTTP/1.1", status, title);
 }
 
 bool httpConn::addContentLen(int contentLen) {
     return addResponse("Content-Length:%d\r\n", contentLen);
 }
 
+bool httpConn::addContentRange() {
+    return addResponse("Content-Range:bytes %lu-%lu/%lu\r\n",
+                       this->parserRecord->rangeBegin,
+                       this->parserRecord->rangeEnd,
+                       this->parserRecord->fileStat.st_size);
+}
+
 bool httpConn::addContentType() {
-    return addResponse("Content-Type:%s\r\n","text/html");
+    if (!strcmp(this->parserRecord->fileType, "html"))
+        return addResponse("Content-Type:%s\r\n", "text/html");
+    else if (!strcmp(this->parserRecord->fileType, "mp4"))
+        return addResponse("Content-Type:%s\r\n", "video/mp4");
+    return true;
 }
 
 bool httpConn::addConn() {
@@ -388,12 +440,15 @@ bool httpConn::addConn() {
 }
 
 bool httpConn::addBlankLine() {
-    return addResponse("%s","\r\n");
+    return addResponse("%s", "\r\n");
 }
 
 void httpConn::addHeader(int contentLen) {
-    // addContentType();
+    addContentType();
     addConn();
+    if (this->parserRecord->isRangeTransp) {
+        addContentRange();
+    }
     addContentLen(contentLen);
     addBlankLine();
 }
@@ -434,18 +489,32 @@ bool httpConn::mergeResponse(HTTPCODE ret) {
         this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size;
         return true;
     }
-    // 可访问文件，200
+    // 可访问文件，200或206
     case FILE_REQUEST: {
-        addLine(200, ok_200_title);
-        addHeader(this->parserRecord->fileStat.st_size);
-        // iovec[0]指向响应报文缓冲区，长度是writeindex
-        this->iv[0].iov_base = this->writeBuffer;
-        this->iv[0].iov_len = this->writeIndx;
-        // iovec[1]指向mmap返回的文件指针，长度是文件大小
-        this->iv[1].iov_base = this->parserRecord->fileMMAP;
-        this->iv[1].iov_len = this->parserRecord->fileStat.st_size;
-        this->ivCount = 2;
-        this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size;
+        if (this->parserRecord->isRangeTransp) {
+            addLine(206, range_206_title);
+            addHeader(this->parserRecord->fileStat.st_size - this->parserRecord->rangeBegin);
+            // iovec[0]指向响应报文缓冲区，长度是writeindex
+            this->iv[0].iov_base = this->writeBuffer;
+            this->iv[0].iov_len = this->writeIndx;
+            // iovec[1]指向mmap返回的文件指针，长度是文件大小与range偏移量
+            this->iv[1].iov_base = this->parserRecord->fileMMAP + this->parserRecord->rangeBegin;
+            this->iv[1].iov_len = this->parserRecord->fileStat.st_size - this->parserRecord->rangeBegin;
+            this->ivCount = 2;
+            this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size - this->parserRecord->rangeBegin;
+        }
+        else {
+            addLine(200, ok_200_title);
+            addHeader(this->parserRecord->fileStat.st_size);
+            // iovec[0]指向响应报文缓冲区，长度是writeindex
+            this->iv[0].iov_base = this->writeBuffer;
+            this->iv[0].iov_len = this->writeIndx;
+            // iovec[1]指向mmap返回的文件指针，长度是文件大小
+            this->iv[1].iov_base = this->parserRecord->fileMMAP;
+            this->iv[1].iov_len = this->parserRecord->fileStat.st_size;
+            this->ivCount = 2;
+            this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size;
+        }
         return true;
     }
     default:
@@ -487,7 +556,14 @@ bool httpConn::writeData() {
         if (this->curWriteIndx >= this->iv[0].iov_len) {
             // 不再发送头部信息
             this->iv[0].iov_len = 0;
-            this->iv[1].iov_base = this->parserRecord->fileMMAP + (this->curWriteIndx-this->writeIndx);
+            if (this->parserRecord->isRangeTransp) {
+                this->iv[1].iov_base = this->parserRecord->fileMMAP 
+                                        + (this->curWriteIndx-this->writeIndx)
+                                        + this->parserRecord->rangeBegin;
+            }
+            else {
+                this->iv[1].iov_base = this->parserRecord->fileMMAP + (this->curWriteIndx-this->writeIndx);
+            }
             this->iv[1].iov_len = this->sendBytes;
         }
         // iovec[0]的内容没发完

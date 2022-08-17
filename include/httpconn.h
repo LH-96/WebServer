@@ -62,10 +62,12 @@ private:
     HTTPCODE parseHeader(char* text);
     HTTPCODE parseContent(char* text);
     HTTPCODE doRequest();
-    HTTPCODE httpParser(); 
+    HTTPCODE httpParser();
+    bool unMMap();
     bool addResponse(const char* format, ...);
     bool addLine(int status, const char* title);
     bool addContentLen(int contentLen);
+    bool addContentRange();
     bool addContentType();
     bool addConn();
     bool addBlankLine();
@@ -89,6 +91,10 @@ private:
         char requestUrl[maxUrlLen];
         struct stat fileStat;
         char* fileMMAP;
+        char fileType[10];
+        bool isRangeTransp;
+        size_t rangeBegin;
+        size_t rangeEnd;
         char httpProt[10];
         CONNECTION conn;
         int contentLen;
