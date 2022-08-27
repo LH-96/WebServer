@@ -53,8 +53,7 @@ public:
 
 private:
     void resetfd(EPOLL_EVENTS eventStatus);
-    void resetConn();
-    void resetHttpInfo();
+    void resetConn(bool isResetWriteOnly = false);
     bool readData();
     char* getLine();
     SUBSTATUS readLine();

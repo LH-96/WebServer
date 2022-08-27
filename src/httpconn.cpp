@@ -53,10 +53,8 @@ void httpConn::init(int efd, int cfd) {
     connNum++;
 }
 
-void httpConn::resetConn() {
-    // 长连接的情况下重置连接的属性
+void httpConn::resetConn(bool isResetWriteOnly) {
     this->parserRecord->parserStatus = CHECK_REQUEST_LINE;
-    this->parserRecord->method = GET;
     memset(this->parserRecord->requestPath, '\0', maxPathLen);
     memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
     unMMap();
@@ -69,39 +67,18 @@ void httpConn::resetConn() {
     this->parserRecord->contentLen = 0;
     this->parserRecord->content = nullptr;
 
-    this->readIndx = 0;
-    this->curReadIndx = 0;
-    this->curLineBegin = 0;
+    if (!isResetWriteOnly) {
+        this->readIndx = 0;
+        this->curReadIndx = 0;
+        this->curLineBegin = 0;
+        memset(this->readBuffer, '\0', maxBuffSize);
+    }
     this->writeIndx = 0;
     this->curWriteIndx = 0;
     this->ivCount = 0;
     this->sendBytes = 0;
-    this->isclose = false;
     memset(this->iv, 0, sizeof(struct iovec)*2);
-    memset(this->readBuffer, '\0', maxBuffSize);
     memset(this->writeBuffer, '\0', maxBuffSize);
-}
-
-void httpConn::resetHttpInfo() {
-    this->parserRecord->parserStatus = CHECK_REQUEST_LINE;
-    memset(this->parserRecord->requestPath, '\0', maxPathLen);
-    memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
-    unMMap();
-    memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
-    memset(this->parserRecord->httpProt, '\0', sizeof(this->parserRecord->httpProt));
-    memset(this->parserRecord->fileType, '\0', sizeof(this->parserRecord->fileType));
-    this->parserRecord->isRangeTransp = false;
-    this->parserRecord->rangeBegin = 0;
-    this->parserRecord->rangeEnd = 0;
-    this->parserRecord->contentLen = 0;
-    this->parserRecord->content = nullptr;
-
-    memset(this->writeBuffer, '\0', maxBuffSize);
-    memset(this->iv, 0, sizeof(struct iovec)*2);
-    this->writeIndx = 0;
-    this->curWriteIndx = 0;
-    this->ivCount = 0;
-    this->sendBytes = 0;
 }
 
 void httpConn::resetfd(EPOLL_EVENTS eventStatus) {
@@ -596,7 +573,7 @@ void httpConn::processConn() {
             resetfd(EPOLLOUT);
             return;
         }
-        resetHttpInfo();
+        resetConn(true);
     }
     if (this->parserRecord->conn == KEEPALIVE) {
         resetConn();
@@ -623,6 +600,6 @@ void httpConn::processWrite() {
         resetfd(EPOLLOUT);
         return;
     }
-    resetHttpInfo();
+    resetConn(true);
     processConn();
 }
