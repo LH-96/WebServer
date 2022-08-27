@@ -17,6 +17,7 @@ public:
     : isClose(false), threadVec(std::vector<std::thread>(threadCount)) {
         for (int i = 0; i < threadCount; i++) {
             threadVec.at(i) = std::thread(&threadPool::worker, this);
+            // printf("init\n");
         }
     }
     ~threadPool() {
@@ -25,6 +26,7 @@ public:
         for (auto i = threadVec.begin(); i != threadVec.end(); i++) {
             if ((*i).joinable()) {
                 (*i).join();
+                // printf("close\n");
             }
         }
     }
@@ -57,7 +59,6 @@ private:
         while (true) {
             std::unique_lock<std::mutex> locker(this->mux);
             if (!this->workQueue.empty()) {
-                this->cond.wait(locker, [this]{return !this->workQueue.empty();});
                 auto task = std::move(this->workQueue.front());
                 this->workQueue.pop();
                 locker.unlock();
@@ -67,7 +68,7 @@ private:
                 break;
             }
             else {
-                this->cond.wait(locker, [this]{return !this->workQueue.empty();});
+                this->cond.wait(locker);
             }
         }
     }
