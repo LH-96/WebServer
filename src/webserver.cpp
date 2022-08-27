@@ -123,6 +123,7 @@ void webserver::buildConn(int efd, int listenfd) {
             continue;
         }
         this->clients[cfd].init(efd, cfd);
+        timer->addTimer(cfd, timeout, std::bind(&httpConn::closeConn, &this->clients[cfd]));
         addfd(efd, cfd, true);
         // printf("New client connect...\n");
     }
@@ -150,9 +151,11 @@ void webserver::epollHandler(const epoll_event *events, const int &eventsLen,
         }
         else if (events[i].events & EPOLLIN) {
             pool->addTask(std::bind(&httpConn::processRead, &this->clients[socketfd]));
+            timer->adjustTimer(socketfd, timeout);
         }
         else if (events[i].events & EPOLLOUT) {
             pool->addTask(std::bind(&httpConn::processWrite, &this->clients[socketfd]));
+            timer->adjustTimer(socketfd, timeout);
         }
         else {
             printf("epollHandler error.\n");
@@ -178,7 +181,7 @@ void webserver::run() {
     addfd(efd, listenfd);
 
     while (true) {
-        int ret = epoll_wait(efd, events, maxEventNumber, -1);
+        int ret = epoll_wait(efd, events, maxEventNumber, timer->getNextTick());
         if (ret < 0) {
             // // 被调试打断
             // if (errno == EINTR)

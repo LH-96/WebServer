@@ -1,55 +1,116 @@
 #include "timer.h"
 
-inline
-bool operator<(const timeNode& lhd, const timeNode& rhd) {
-    return lhd.expire < rhd.expire ? true : false;
-}
+void heapTimer::swapNode(size_t i, size_t j) {
+    std::swap(heap[i], heap[j]);
+    idMap[heap[i].id] = i;
+    idMap[heap[j].id] = j;
+} 
 
-time_t timer::getTime() {
-    auto timeNow = std::chrono::time_point_cast<MS>(CLOCK::now());
-    auto duration = std::chrono::duration_cast<MS>(timeNow.time_since_epoch());
-    return duration.count();
-}
-
-time_t timer::timeToTrig() {
-    auto beg = timeMap.begin();
-    if (beg == timeMap.end())
-        return -1;
-    auto distance = beg->expire - getTime();
-    return distance > 0 ? distance : 0;
-}
-
-bool timer::isTCPConn(int sock) {
-	struct tcp_info info; 
-    socklen_t len = sizeof(info);
-	getsockopt(sock, IPPROTO_TCP, TCP_INFO, &info, &len);
-    return info.tcpi_state == TCP_ESTABLISHED ? true : false;
-}
-
-void timer::addTimer(int cfd, time_t expire, std::function<void()> func) {
-    fdToNode.emplace(cfd, timeNode(cfd, getTime()+expire, func));
-    timeMap.emplace(cfd, getTime()+expire, func);
-}
-
-void timer::resetTimer(int cfd, time_t expireNew) {
-    auto node = timeMap.find(fdToNode[cfd]);
-    if (node != timeMap.end()) {
-        auto func = node->func;
-        timeMap.erase(node);
-        fdToNode.erase(cfd);
-        addTimer(cfd, expireNew, func);
-    }
-}
-
-bool timer::checkTimer() {
-    auto beg = timeMap.begin();
-    if (beg != timeMap.end() && beg->expire <= getTime()) {
-        if (isTCPConn(beg->cfd)) {
-            beg->func();
+void heapTimer::addTimer(int id, int timeout, const CALLBACK& cb) {
+    size_t i;
+    if(idMap.count(id) == 0) {
+        // 插入新节点
+        i = ++this->heapSize;
+        auto tmpNode = timeNode{id, CLOCK::now() + MS(timeout), cb};
+        heap.push_back(timeNode{id, TIMEPOINT{}, cb});
+        for (; tmpNode < heap[i/2]; i /= 2) {
+            heap[i] = heap[i/2];
+            idMap[heap[i/2].id] = i;
         }
-        timeMap.erase(beg);
-        fdToNode.erase(beg->cfd);
-        return true;
+        heap[i] = tmpNode;
+        idMap[tmpNode.id] = i;
+    } 
+    else {
+        // 节点存在，说明fd已重新利用，直接调整节点的timeout
+        i = idMap[id];
+        heap[i].expires = CLOCK::now() + MS(timeout);
+        heap[i].cb = cb;
+        auto tmpNode = heap[i];
+        size_t child;
+        for (; i*2 <= heapSize; i = child) {
+            child = i*2;
+            if (child != heapSize && heap[child+1] < heap[child])
+                child++;
+            if (heap[child] < tmpNode) {
+                heap[i] = heap[child];
+                idMap[heap[child].id] = i;
+            }
+            else
+                break;
+        }
+        heap[i] = tmpNode;
+        idMap[tmpNode.id] = i;
     }
-    return false;
+}
+
+void heapTimer::delTop(size_t index) {
+    swapNode(index, heapSize);
+    idMap.erase(heap.back().id);
+    heap.pop_back();
+    heapSize--;
+
+    if (heapSize == 0)
+        return;
+
+    auto tmpNode = heap[index];
+    size_t i, child;
+    for (i = index; i*2 <= heapSize; i = child) {
+        child = i*2;
+        if (child != heapSize && heap[child+1] < heap[child])
+            child++;
+        if (heap[child] < tmpNode) {
+            heap[i] = heap[child];
+            idMap[heap[child].id] = i;
+        }
+        else
+            break;
+    }
+    heap[i] = tmpNode;
+    idMap[tmpNode.id] = i;
+}
+
+void heapTimer::adjustTimer(int id, int timeout) {
+    heap[idMap[id]].expires = CLOCK::now() + MS(timeout);
+
+    size_t i = idMap[id];
+    auto tmpNode = heap[i];
+    size_t child;
+    for (; i*2 <= heapSize; i = child) {
+        child = i*2;
+        if (child != heapSize && heap[child+1] < heap[child])
+            child++;
+        if (heap[child] < tmpNode) {
+            heap[i] = heap[child];
+            idMap[heap[child].id] = i;
+        }
+        else
+            break;
+    }
+    heap[i] = tmpNode;
+    idMap[tmpNode.id] = i;
+}
+
+void heapTimer::tick() {
+    // 处理超时节点
+    if(heapSize == 0) {
+        return;
+    }
+    while(heapSize != 0) {
+        timeNode node = heap[1];
+        if(std::chrono::duration_cast<MS>(node.expires - CLOCK::now()).count() > 0) { 
+            break; 
+        }
+        node.cb();
+        delTop(1);
+    }
+}
+
+int heapTimer::getNextTick() {
+    tick();
+    int res = -1;
+    if(heapSize != 0) {
+        res = std::chrono::duration_cast<MS>(heap[1].expires - CLOCK::now()).count();
+        if(res < 0) { res = 0; }
+    }
+    return res;
 }
