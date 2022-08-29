@@ -19,20 +19,20 @@ const char *error_404_title = "Not Found";
  */
 void httpConn::init(int efd, int cfd) {
     // 初始化http解析信息，默认get方法，短连接
-    this->parserRecord->parserStatus = CHECK_REQUEST_LINE;
-    this->parserRecord->method = GET;
-    memset(this->parserRecord->requestPath, '\0', maxPathLen);
-    memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
+    parserRecord->parserStatus = CHECK_REQUEST_LINE;
+    parserRecord->method = GET;
+    memset(parserRecord->requestPath, '\0', maxPathLen);
+    memset(parserRecord->requestUrl, '\0', maxUrlLen);
     unMMap();
-    memset(this->parserRecord->fileType, '\0', sizeof(this->parserRecord->fileType));
-    this->parserRecord->isRangeTransp = false;
-    this->parserRecord->rangeBegin = 0;
-    this->parserRecord->rangeEnd = 0;
-    memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
-    memset(this->parserRecord->httpProt, '\0', sizeof(this->parserRecord->httpProt));
-    this->parserRecord->conn = CLOSE;
-    this->parserRecord->contentLen = 0;
-    this->parserRecord->content = nullptr;
+    memset(parserRecord->fileType, '\0', sizeof(parserRecord->fileType));
+    parserRecord->isRangeTransp = false;
+    parserRecord->rangeBegin = 0;
+    parserRecord->rangeEnd = 0;
+    memset(&parserRecord->fileStat, 0, sizeof(struct stat));
+    memset(parserRecord->httpProt, '\0', sizeof(parserRecord->httpProt));
+    parserRecord->conn = CLOSE;
+    parserRecord->contentLen = 0;
+    parserRecord->content = nullptr;
 
     // 初始化其他属性
     this->efd = efd;
@@ -54,18 +54,18 @@ void httpConn::init(int efd, int cfd) {
 }
 
 void httpConn::resetConn(bool isResetWriteOnly) {
-    this->parserRecord->parserStatus = CHECK_REQUEST_LINE;
-    memset(this->parserRecord->requestPath, '\0', maxPathLen);
-    memset(this->parserRecord->requestUrl, '\0', maxUrlLen);
+    parserRecord->parserStatus = CHECK_REQUEST_LINE;
+    memset(parserRecord->requestPath, '\0', maxPathLen);
+    memset(parserRecord->requestUrl, '\0', maxUrlLen);
     unMMap();
-    memset(&this->parserRecord->fileStat, 0, sizeof(struct stat));
-    memset(this->parserRecord->fileType, '\0', sizeof(this->parserRecord->fileType));
-    memset(this->parserRecord->httpProt, '\0', sizeof(this->parserRecord->httpProt));
-    this->parserRecord->isRangeTransp = false;
-    this->parserRecord->rangeBegin = 0;
-    this->parserRecord->rangeEnd = 0;
-    this->parserRecord->contentLen = 0;
-    this->parserRecord->content = nullptr;
+    memset(&parserRecord->fileStat, 0, sizeof(struct stat));
+    memset(parserRecord->fileType, '\0', sizeof(parserRecord->fileType));
+    memset(parserRecord->httpProt, '\0', sizeof(parserRecord->httpProt));
+    parserRecord->isRangeTransp = false;
+    parserRecord->rangeBegin = 0;
+    parserRecord->rangeEnd = 0;
+    parserRecord->contentLen = 0;
+    parserRecord->content = nullptr;
 
     if (!isResetWriteOnly) {
         this->readIndx = 0;
@@ -167,9 +167,9 @@ httpConn::HTTPCODE httpConn::parseLine(char* text) {
     // 在空格位填\0，取出前面的字符串就是method
     *path++ = '\0';
     if (strcasecmp(text, "GET") == 0)
-        this->parserRecord->method = GET;
+        parserRecord->method = GET;
     else if (strcasecmp(text, "POST") == 0)
-        this->parserRecord->method = POST;
+        parserRecord->method = POST;
     else
         return BAD_REQUEST;
 
@@ -193,24 +193,24 @@ httpConn::HTTPCODE httpConn::parseLine(char* text) {
     }
     if (!path || path[0]!='/')
         return BAD_REQUEST;
-    strcpy(this->parserRecord->requestUrl, path);
+    strcpy(parserRecord->requestUrl, path);
 
     // 取出path后，后面还可能有空格或\t，跳过直到第一个非空字符
     prot += strspn(prot, " \t");
     // 匹配http协议版本
     if (strcasecmp(prot, "HTTP/1.1") == 0)
-        strcpy(this->parserRecord->httpProt, prot);
+        strcpy(parserRecord->httpProt, prot);
     else
         return BAD_REQUEST;
 
-    this->parserRecord->parserStatus = CHECK_REQUEST_HEADER;
+    parserRecord->parserStatus = CHECK_REQUEST_HEADER;
     return GET_REQUEST;
 }
 
 httpConn::HTTPCODE httpConn::parseHeader(char* text) {
     if (text[0] == '\0') {
-        if (this->parserRecord->contentLen != 0) {
-            this->parserRecord->parserStatus = CHECK_REQUEST_CONTENT;
+        if (parserRecord->contentLen != 0) {
+            parserRecord->parserStatus = CHECK_REQUEST_CONTENT;
             return NO_REQUEST;
         }
         return GET_REQUEST;
@@ -220,47 +220,48 @@ httpConn::HTTPCODE httpConn::parseHeader(char* text) {
 
         text += strspn(text, " \t");
         if (strcasecmp(text, "keep-alive") == 0)
-            this->parserRecord->conn = KEEPALIVE;
+            parserRecord->conn = KEEPALIVE;
     }
     else if (strncasecmp(text, "Content-length:", 15) == 0) {
         text += 15;
         text += strspn(text, " \t");
-        this->parserRecord->contentLen = atol(text);
+        parserRecord->contentLen = atol(text);
     }
     else if (strncasecmp(text, "Range:", 6) == 0) {
         // Range:bytes=0-123
         text += 13;
         char* tmp = nullptr;  // 使用strtoul后，tmp指向第一个非数字位置（—）
-        this->parserRecord->isRangeTransp = true;
-        this->parserRecord->rangeBegin = strtoul(text, &tmp, 0);
+        parserRecord->isRangeTransp = true;
+        parserRecord->rangeBegin = strtoul(text, &tmp, 0);
         if (strlen(tmp) == 1) {
             // Range:bytes=0- ，将rangeEnd暂设为-1，后面获取请求文件再设为文件大小-1
-            this->parserRecord->rangeEnd = -1;
+            parserRecord->rangeEnd = -1;
         }
         else {
             text = tmp + 1;
             tmp = nullptr;
-            this->parserRecord->rangeEnd = strtoul(text, &tmp, 0);
+            parserRecord->rangeEnd = strtoul(text, &tmp, 0);
         }
     }
     return NO_REQUEST;
 }
 
 httpConn::HTTPCODE httpConn::parseContent(char* text) {
-    if (this->readIndx >= (this->parserRecord->contentLen+this->curReadIndx)) {
-        text[this->parserRecord->contentLen] = '\0';
-        this->parserRecord->content = text;
+    if (this->readIndx >= (parserRecord->contentLen+this->curReadIndx)) {
+        parserRecord->content = text;
+        this->curReadIndx += parserRecord->contentLen;
+        this->curLineBegin += parserRecord->contentLen;
         return GET_REQUEST;
     }
     return NO_REQUEST;
 }
 
 httpConn::HTTPCODE httpConn::doRequest() {
-    strcpy(this->parserRecord->requestPath, rootPath);
+    strcpy(parserRecord->requestPath, rootPath);
     int len = strlen(rootPath);
 
     // 查找请求url中 / 的位置
-    const char *p = strrchr(this->parserRecord->requestUrl, '/');
+    const char *p = strrchr(parserRecord->requestUrl, '/');
 
     // 登录，注册校验
 
@@ -288,29 +289,29 @@ httpConn::HTTPCODE httpConn::doRequest() {
         strcpy(url, "/404.html");
     }
     // 拼接最终访问文件path
-    strncpy(this->parserRecord->requestPath+len, url, strlen(url));
+    strncpy(parserRecord->requestPath+len, url, strlen(url));
 
     // 用stat结构体存储文件信息
-    stat(this->parserRecord->requestPath, &this->parserRecord->fileStat);
+    stat(parserRecord->requestPath, &parserRecord->fileStat);
 
     // 判断文件是否可读，不可读返回FORBIDDEN_REQUEST
-    if (!(this->parserRecord->fileStat.st_mode & S_IROTH))
+    if (!(parserRecord->fileStat.st_mode & S_IROTH))
         return FORBIDDEN_REQUEST;
 
     // 获取文件类型
-    p = strrchr(this->parserRecord->requestPath, '.');
-    strcpy(this->parserRecord->fileType, p+1);
+    p = strrchr(parserRecord->requestPath, '.');
+    strcpy(parserRecord->fileType, p+1);
 
     // 用只读方式获取文件fd，用mmap映射到内存中
-    int ffd = open(this->parserRecord->requestPath, O_RDONLY);
-    this->parserRecord->fileMMAP = (char*)mmap(0, this->parserRecord->fileStat.st_size, 
+    int ffd = open(parserRecord->requestPath, O_RDONLY);
+    parserRecord->fileMMAP = (char*)mmap(0, parserRecord->fileStat.st_size, 
                                     PROT_READ, MAP_PRIVATE, 
                                     ffd, 0);
     close(ffd);
 
     // 如果是range方式传输，且range尾端未知（-1），设为文件大小-1(因为是从0开始索引)
-    if (this->parserRecord->isRangeTransp && (this->parserRecord->rangeEnd == -1)) {
-        this->parserRecord->rangeEnd = this->parserRecord->fileStat.st_size -1;
+    if (parserRecord->isRangeTransp && (parserRecord->rangeEnd == -1)) {
+        parserRecord->rangeEnd = parserRecord->fileStat.st_size -1;
     }
 
     return strcmp(url, "/404.html")==0 ? NO_RESOURCE : FILE_REQUEST;
@@ -321,14 +322,14 @@ httpConn::HTTPCODE httpConn::httpParser() {
     HTTPCODE status = NO_REQUEST;
     char* text = nullptr;
 
-    while ((this->parserRecord->parserStatus == CHECK_REQUEST_CONTENT)
+    while ((parserRecord->parserStatus == CHECK_REQUEST_CONTENT)
             ||
            ((lineStatus=readLine()) == LINE_OK)) {
 
         text = getLine();
         this->curLineBegin = this->curReadIndx;
 
-        switch (this->parserRecord->parserStatus) {
+        switch (parserRecord->parserStatus) {
         case CHECK_REQUEST_LINE: {
             status = parseLine(text);
             if (status == BAD_REQUEST)
@@ -347,6 +348,8 @@ httpConn::HTTPCODE httpConn::httpParser() {
             status = parseContent(text);
             if (status == GET_REQUEST)
                 return doRequest();
+            else
+                return NO_REQUEST;
             break;
         }
         default:
@@ -357,9 +360,9 @@ httpConn::HTTPCODE httpConn::httpParser() {
 }
 
 bool httpConn::unMMap() {
-    if (this->parserRecord->fileMMAP) {
-        munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-        this->parserRecord->fileMMAP = nullptr;
+    if (parserRecord->fileMMAP) {
+        munmap(parserRecord->fileMMAP, parserRecord->fileStat.st_size);
+        parserRecord->fileMMAP = nullptr;
         return true;
     }
     return false;
@@ -398,22 +401,22 @@ bool httpConn::addContentLen(int contentLen) {
 
 bool httpConn::addContentRange() {
     return addResponse("Content-Range:bytes %lu-%lu/%lu\r\n",
-                       this->parserRecord->rangeBegin,
-                       this->parserRecord->rangeEnd,
-                       this->parserRecord->fileStat.st_size);
+                       parserRecord->rangeBegin,
+                       parserRecord->rangeEnd,
+                       parserRecord->fileStat.st_size);
 }
 
 bool httpConn::addContentType() {
-    if (!strcmp(this->parserRecord->fileType, "html"))
+    if (!strcmp(parserRecord->fileType, "html"))
         return addResponse("Content-Type:%s\r\n", "text/html");
-    else if (!strcmp(this->parserRecord->fileType, "mp4"))
+    else if (!strcmp(parserRecord->fileType, "mp4"))
         return addResponse("Content-Type:%s\r\n", "video/mp4");
     return true;
 }
 
 bool httpConn::addConn() {
     return addResponse("Connection:%s\r\n",
-                        (this->parserRecord->conn==KEEPALIVE)?"keep-alive":"close");
+                        (parserRecord->conn==KEEPALIVE)?"keep-alive":"close");
 }
 
 bool httpConn::addBlankLine() {
@@ -423,7 +426,7 @@ bool httpConn::addBlankLine() {
 void httpConn::addHeader(int contentLen) {
     addContentType();
     addConn();
-    if (this->parserRecord->isRangeTransp) {
+    if (parserRecord->isRangeTransp) {
         addContentRange();
     }
     addContentLen(contentLen);
@@ -455,42 +458,42 @@ bool httpConn::mergeResponse(HTTPCODE ret) {
     // 请求错误文件，404
     case NO_RESOURCE: {
         addLine(404, error_404_title);
-        addHeader(this->parserRecord->fileStat.st_size);
+        addHeader(parserRecord->fileStat.st_size);
         // iovec[0]指向响应报文缓冲区，长度是writeindex
         this->iv[0].iov_base = this->writeBuffer;
         this->iv[0].iov_len = this->writeIndx;
         // iovec[1]指向mmap返回的文件指针，长度是文件大小
-        this->iv[1].iov_base = this->parserRecord->fileMMAP;
-        this->iv[1].iov_len = this->parserRecord->fileStat.st_size;
+        this->iv[1].iov_base = parserRecord->fileMMAP;
+        this->iv[1].iov_len = parserRecord->fileStat.st_size;
         this->ivCount = 2;
-        this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size;
+        this->sendBytes = this->writeIndx + parserRecord->fileStat.st_size;
         return true;
     }
     // 可访问文件，200或206
     case FILE_REQUEST: {
-        if (this->parserRecord->isRangeTransp) {
+        if (parserRecord->isRangeTransp) {
             addLine(206, range_206_title);
-            addHeader(this->parserRecord->fileStat.st_size - this->parserRecord->rangeBegin);
+            addHeader(parserRecord->fileStat.st_size - parserRecord->rangeBegin);
             // iovec[0]指向响应报文缓冲区，长度是writeindex
             this->iv[0].iov_base = this->writeBuffer;
             this->iv[0].iov_len = this->writeIndx;
             // iovec[1]指向mmap返回的文件指针，长度是文件大小与range偏移量
-            this->iv[1].iov_base = this->parserRecord->fileMMAP + this->parserRecord->rangeBegin;
-            this->iv[1].iov_len = this->parserRecord->fileStat.st_size - this->parserRecord->rangeBegin;
+            this->iv[1].iov_base = parserRecord->fileMMAP + parserRecord->rangeBegin;
+            this->iv[1].iov_len = parserRecord->fileStat.st_size - parserRecord->rangeBegin;
             this->ivCount = 2;
-            this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size - this->parserRecord->rangeBegin;
+            this->sendBytes = this->writeIndx + parserRecord->fileStat.st_size - parserRecord->rangeBegin;
         }
         else {
             addLine(200, ok_200_title);
-            addHeader(this->parserRecord->fileStat.st_size);
+            addHeader(parserRecord->fileStat.st_size);
             // iovec[0]指向响应报文缓冲区，长度是writeindex
             this->iv[0].iov_base = this->writeBuffer;
             this->iv[0].iov_len = this->writeIndx;
             // iovec[1]指向mmap返回的文件指针，长度是文件大小
-            this->iv[1].iov_base = this->parserRecord->fileMMAP;
-            this->iv[1].iov_len = this->parserRecord->fileStat.st_size;
+            this->iv[1].iov_base = parserRecord->fileMMAP;
+            this->iv[1].iov_len = parserRecord->fileStat.st_size;
             this->ivCount = 2;
-            this->sendBytes = this->writeIndx + this->parserRecord->fileStat.st_size;
+            this->sendBytes = this->writeIndx + parserRecord->fileStat.st_size;
         }
         return true;
     }
@@ -520,9 +523,9 @@ bool httpConn::writeData() {
             if (errno == EAGAIN) {
                 return false;
             }
-            if (this->parserRecord->fileMMAP) {
-                munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-                this->parserRecord->fileMMAP = nullptr;
+            if (parserRecord->fileMMAP) {
+                munmap(parserRecord->fileMMAP, parserRecord->fileStat.st_size);
+                parserRecord->fileMMAP = nullptr;
             }
             return true;
         }
@@ -533,13 +536,13 @@ bool httpConn::writeData() {
         if (this->curWriteIndx >= this->iv[0].iov_len) {
             // 不再发送头部信息
             this->iv[0].iov_len = 0;
-            if (this->parserRecord->isRangeTransp) {
-                this->iv[1].iov_base = this->parserRecord->fileMMAP 
+            if (parserRecord->isRangeTransp) {
+                this->iv[1].iov_base = parserRecord->fileMMAP 
                                         + (this->curWriteIndx-this->writeIndx)
-                                        + this->parserRecord->rangeBegin;
+                                        + parserRecord->rangeBegin;
             }
             else {
-                this->iv[1].iov_base = this->parserRecord->fileMMAP + (this->curWriteIndx-this->writeIndx);
+                this->iv[1].iov_base = parserRecord->fileMMAP + (this->curWriteIndx-this->writeIndx);
             }
             this->iv[1].iov_len = this->sendBytes;
         }
@@ -551,9 +554,9 @@ bool httpConn::writeData() {
 
         // 数据全部发送完成
         if (this->sendBytes <= 0) {
-            if (this->parserRecord->fileMMAP) {
-                munmap(this->parserRecord->fileMMAP, this->parserRecord->fileStat.st_size);
-                this->parserRecord->fileMMAP = nullptr;
+            if (parserRecord->fileMMAP) {
+                munmap(parserRecord->fileMMAP, parserRecord->fileStat.st_size);
+                parserRecord->fileMMAP = nullptr;
             }
             return true; 
         }
@@ -575,7 +578,7 @@ void httpConn::processConn() {
         }
         resetConn(true);
     }
-    if (this->parserRecord->conn == KEEPALIVE) {
+    if (parserRecord->conn == KEEPALIVE) {
         resetConn();
         resetfd(EPOLLIN);
         return;
