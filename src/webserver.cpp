@@ -3,6 +3,13 @@
 extern const int maxEventNumber = 10240;
 extern const int maxHttpConn = 10240;
 
+void webserver::logInit() {
+    if (0 == closeLog) {
+        log::getInstance()->init("/home/leo/WebServer/log/ServerLog.log", 
+                                  closeLog, logMaxBufSiz, logMaxLines, logType);
+    }
+}
+
 /**
  * @brief 创建监听fd
  * 
@@ -122,9 +129,11 @@ void webserver::buildConn(int efd, int listenfd) {
             printf("too much clients...\n");
             continue;
         }
-        this->clients[cfd].init(efd, cfd);
+        this->clients[cfd].init(efd, cfd, closeLog);
         timer->addTimer(cfd, timeout, std::bind(&httpConn::closeConn, &this->clients[cfd]));
         addfd(efd, cfd, true);
+        LOG_INFO("Add client(%s:%d), clients:%d", 
+                 inet_ntoa(caddr.sin_addr), ntohs(caddr.sin_port), int(httpConn::connNum));
         // printf("New client connect...\n");
     }
 }
@@ -152,10 +161,12 @@ void webserver::epollHandler(const epoll_event *events, const int &eventsLen,
         else if (events[i].events & EPOLLIN) {
             pool->addTask(std::bind(&httpConn::processRead, &this->clients[socketfd]));
             timer->adjustTimer(socketfd, timeout);
+            LOG_INFO("%s", "adjust timer (EPOLLIN)");
         }
         else if (events[i].events & EPOLLOUT) {
             pool->addTask(std::bind(&httpConn::processWrite, &this->clients[socketfd]));
             timer->adjustTimer(socketfd, timeout);
+            LOG_INFO("%s", "adjust timer (EPOLLOUT)");
         }
         else {
             printf("epollHandler error.\n");
@@ -168,6 +179,9 @@ void webserver::epollHandler(const epoll_event *events, const int &eventsLen,
  * 
  */
 void webserver::run() {
+    // log
+    logInit();
+    
     // listenfd
     int listenfd = initListenfd();
 
