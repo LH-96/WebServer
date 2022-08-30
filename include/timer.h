@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <functional> 
 #include <chrono>
+#include "log.h"
 
 typedef std::function<void()> CALLBACK;
 typedef std::chrono::high_resolution_clock CLOCK;
@@ -23,8 +24,8 @@ struct timeNode {
 
 class heapTimer {
 public:
-    heapTimer()
-    :heapSize(0) { 
+    heapTimer(int isCloseLog = 1)
+    :heapSize(0), closeLog(isCloseLog) { 
         heap.reserve(1024);
         heap.push_back(timeNode{0, TIMEPOINT{}, nullptr});
     }
@@ -45,4 +46,5 @@ private:
     size_t heapSize;
     std::vector<timeNode> heap;
     std::unordered_map<int, size_t> idMap;
+    int closeLog;
 };

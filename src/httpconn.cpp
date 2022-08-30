@@ -17,7 +17,7 @@ const char *error_404_title = "Not Found";
  * @param efd 
  * @param cfd 
  */
-void httpConn::init(int efd, int cfd) {
+void httpConn::init(int efd, int cfd, int isCloseLog) {
     // 初始化http解析信息，默认get方法，短连接
     parserRecord->parserStatus = CHECK_REQUEST_LINE;
     parserRecord->method = GET;
@@ -48,6 +48,8 @@ void httpConn::init(int efd, int cfd) {
     memset(this->iv, 0, sizeof(struct iovec)*2);
     memset(this->readBuffer, '\0', maxBuffSize);
     memset(this->writeBuffer, '\0', maxBuffSize);
+
+    this->closeLog = isCloseLog;
 
     // client数量+1
     connNum++;
@@ -95,6 +97,7 @@ void httpConn::closeConn() {
         close(this->cfd);
         // client数量-1
         connNum--;
+        LOG_INFO("close fd:%d, clients:%d", this->cfd, int(connNum));
         // printf("server close..\n");
     }
 }

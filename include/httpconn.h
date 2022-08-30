@@ -12,6 +12,7 @@
 #include <cstdarg>
 #include <memory>
 #include <atomic>
+#include "log.h"
 
 class httpConn {
 public:
@@ -40,7 +41,7 @@ public:
     :   parserRecord(std::make_shared<record>()),
         efd(0), cfd(0), readIndx(0), curReadIndx(0), 
         curLineBegin(0), writeIndx(0), curWriteIndx(0),
-        ivCount(0), sendBytes(0), isclose(false) {
+        ivCount(0), sendBytes(0), isclose(false), closeLog(1) {
         memset(readBuffer, '\0', maxBuffSize);
         memset(writeBuffer, '\0', maxBuffSize);
     }
@@ -49,7 +50,7 @@ public:
     httpConn(const httpConn&) = delete;
     httpConn& operator= (const httpConn&) = delete;
 
-    void init(int efd, int cfd);
+    void init(int efd, int cfd, int isCloseLog);
 
 private:
     void resetfd(EPOLL_EVENTS eventStatus);
@@ -115,4 +116,5 @@ private:
     int ivCount;
     int sendBytes;
     bool isclose;
+    int closeLog;
 };

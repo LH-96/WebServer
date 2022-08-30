@@ -101,6 +101,7 @@ void heapTimer::tick() {
             break; 
         }
         node.cb();
+        LOG_INFO("delete timer, fd:%d", heap[1].id);
         delTop(1);
     }
 }
