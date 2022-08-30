@@ -14,7 +14,7 @@
 class threadPool {
 public:
     explicit threadPool(int threadCount = 8)
-    : isClose(false), threadVec(std::vector<std::thread>(threadCount)) {
+    : isClose(false), threadVec(threadCount) {
         for (int i = 0; i < threadCount; i++) {
             threadVec.at(i) = std::thread(&threadPool::worker, this);
             // printf("init\n");
