@@ -104,7 +104,7 @@ void webserver::buildConn(int efd, int listenfd) {
 
     // 设置accept循环，接收client连接（因为listenfd可能是ET模式）
     while (true) {
-        caddrLen = sizeof(caddrLen);
+        caddrLen = sizeof(caddr);
         cfd = accept(listenfd, (struct sockaddr*)&caddr, &caddrLen);
         if (cfd == -1) {
             if ((errno==EAGAIN) || (errno==EWOULDBLOCK)) {
