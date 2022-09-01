@@ -476,15 +476,15 @@ bool httpConn::mergeResponse(HTTPCODE ret) {
     case FILE_REQUEST: {
         if (parserRecord->isRangeTransp) {
             addLine(206, range_206_title);
-            addHeader(parserRecord->fileStat.st_size - parserRecord->rangeBegin);
+            addHeader(parserRecord->rangeEnd - parserRecord->rangeBegin + 1);
             // iovec[0]指向响应报文缓冲区，长度是writeindex
             this->iv[0].iov_base = this->writeBuffer;
             this->iv[0].iov_len = this->writeIndx;
             // iovec[1]指向mmap返回的文件指针，长度是文件大小与range偏移量
             this->iv[1].iov_base = parserRecord->fileMMAP + parserRecord->rangeBegin;
-            this->iv[1].iov_len = parserRecord->fileStat.st_size - parserRecord->rangeBegin;
+            this->iv[1].iov_len = parserRecord->rangeEnd - parserRecord->rangeBegin + 1;
             this->ivCount = 2;
-            this->sendBytes = this->writeIndx + parserRecord->fileStat.st_size - parserRecord->rangeBegin;
+            this->sendBytes = this->writeIndx + parserRecord->rangeEnd - parserRecord->rangeBegin + 1;
         }
         else {
             addLine(200, ok_200_title);
