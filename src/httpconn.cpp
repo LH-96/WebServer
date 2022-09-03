@@ -526,10 +526,7 @@ bool httpConn::writeData() {
             if (errno == EAGAIN) {
                 return false;
             }
-            if (parserRecord->fileMMAP) {
-                munmap(parserRecord->fileMMAP, parserRecord->fileStat.st_size);
-                parserRecord->fileMMAP = nullptr;
-            }
+            unMMap();
             return true;
         }
 
@@ -557,10 +554,7 @@ bool httpConn::writeData() {
 
         // 数据全部发送完成
         if (this->sendBytes <= 0) {
-            if (parserRecord->fileMMAP) {
-                munmap(parserRecord->fileMMAP, parserRecord->fileStat.st_size);
-                parserRecord->fileMMAP = nullptr;
-            }
+            unMMap();
             return true; 
         }
     }
