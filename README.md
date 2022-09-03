@@ -22,7 +22,7 @@ make
 ./WebServer
 ```
 
-## WeBbench压力测试
+## WebBench压力测试
 ![image-webbench](https://github.com/LH-96/WebServer/blob/main/root/webbench_test.png)  
 
 ```bash
